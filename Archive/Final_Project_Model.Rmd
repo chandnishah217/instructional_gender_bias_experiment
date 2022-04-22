@@ -1,0 +1,164 @@
+---
+title: "Exploration and Models"
+author: Elizabeth Khan, Estrella Ndrianasy, Chandni Shah, Michelle Shen, Catherine
+  Tsai
+date: "November 8, 2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(data.table)
+library(magrittr)
+library(ggplot2)
+library(sandwich)
+library(lmtest)
+library(stargazer)
+library(stringr)
+library(tidyverse)
+library(gtsummary)
+library(vtable)
+
+
+theme_set(theme_minimal())
+options(tinytex.verbose = TRUE)
+options(warn=-1)
+```
+
+## 
+Import data and remove invalid age; create column to indicate wheter or not subject has a college degree
+
+
+```{r survey}
+d <- fread("survey_cleaned_with_states.csv")
+head(d)
+d <- d[Age!='Other']
+
+degrees = c("Bachelors degree","Associates degree","Masters degree")
+
+d<- d[,college_degree:= ifelse(Education %in% degrees, 1,0)]
+length(d$college_degree)
+```
+
+## Randomness Check
+
+In this section, we verify if the block randomization was successful; there should be no increase in predicting whether or not someone is in the treatment or control group based on their blocks.
+
+```{r}
+null_model <- lm(assigned~1,data=d)
+full_model <- lm(assigned ~ 1 + as.factor(Age)+as.factor(Gender), data=d)
+f_test <- anova(full_model, null_model, test ='F')
+f_test
+```
+Based on the F-test results there is no evidence to suggest the adding in the block covariates increased the accuracy of predicting whether or not the subject received the treatment.
+
+## Plots and Tables
+
+Summary of subject assignment and demographics
+
+```{r plots, echo=FALSE}
+d %>%
+  select(Gender, assignment, Age) %>%
+  tbl_summary(by = Gender) %>%
+  add_overall()
+```
+```{r}
+d %>%
+  select(Gender, Education, assignment) %>%
+  tbl_summary(by = assignment) %>%
+  add_overall()
+```
+```{r}
+cols <- c("instr_enthusiasm","instr_professional", "instr_subject","instr_material","instr_rating","avg_rating","assignment")
+
+st(d[,..cols], group = 'assignment',
+   summ = list(
+     c('notNA(x)','mean(x)'),
+     c('notNA(x)','mean(x)')
+   ),
+   summ.names = list(
+     c('N','Mean'),
+     c('Count','Percent')
+   ), out='htmlreturn')
+
+
+st(d[,..cols], group = 'assignment', group.test=TRUE, out='kable')
+
+```
+```{r}
+
+d$quiz_grade <- as.factor(d$quiz_avg*100)
+ggplot(d, aes(x=quiz_grade))+
+geom_bar(aes(y = (..count..)),fill="lightblue")+
+labs(title="Distribution of Retention Quiz Scores",
+        x ="Retention Quiz Score", y = "Count")
+
+```
+
+```{r}
+ggplot(d, aes(x=assignment, y=avg_rating, fill=assignment))+
+  geom_boxplot()+
+  labs(title="Bar Chart of Treatment Assignment versus Average Instructor Rating",
+        x ="Treatment Assignment", y = "Average Instructor Rating")
+```
+```{r}
+ggplot(d, aes(x=video_watched, y=avg_rating, fill=assignment))+
+  geom_boxplot()+
+  labs(title="Bar Chart of Video Watched versus Average Instructor Rating",
+        x ="Video Watched", y = "Average Instructor Rating")+theme(axis.text.x = element_text(angle = -30))
+```
+```{r}
+ggplot(d, aes(x=video_watched, y=instr_enthusiasm, fill=assignment))+
+  geom_boxplot()+
+  labs(title="Bar Chart of Video Watched versus Average Instructor Enthusiasm",
+        x ="Video Watched", y = "Instructor Enthusiasm Rating")+theme(axis.text.x = element_text(angle = -30))
+```
+
+
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+```{r}
+model_1 <- lm(avg_rating ~ as.factor(Age) + as.factor(Gender)+assignment, data=d)
+model_2 <- lm(instr_rating ~ as.factor(Age) + as.factor(Gender)+ assignment, data=d)
+model_3 <- lm(instr_subject ~ as.factor(Age) + as.factor(Gender)+assignment, data=d)
+model_4 <- lm(instr_material ~ as.factor(Age) + as.factor(Gender)+assignment, data=d)
+model_5 <- lm(instr_enthusiasm ~ as.factor(Age) + as.factor(Gender)+assignment , data=d)
+model_6 <- lm(instr_enthusiasm ~ as.factor(Age) + as.factor(Gender)+assignment +as.factor(Gender)*assignment, data=d)
+model_7 <- lm(avg_rating ~ as.factor(Age) + as.factor(Gender)+assignment +as.factor(Gender)*assignment, data=d)
+model_8 <- lm(instr_rating ~ as.factor(Age) + as.factor(Gender)+assignment +as.factor(Gender)*assignment, data=d)
+```
+```{r}
+#models with blocking across instructor ratings
+stargazer(model_1, model_2, model_3,model_4, model_5, type = 'text')
+
+#interaction term models
+stargazer( model_6, model_7, model_8, type = 'text')
+```
+```{r baseline_models}
+# does having a college degree have an effect
+mod <- lm(instr_rating ~  as.factor(Age) + as.factor(Gender)+ as.factor(college_degree) + assignment, data=d)
+mod_2 <- lm(instr_subject ~  as.factor(Age) + as.factor(Gender)+ as.factor(college_degree) + assignment, data=d)
+mod_3 <- lm(instr_material ~  as.factor(Age) + as.factor(Gender)+ as.factor(college_degree) + assignment, data=d)
+mod_4 <- lm(instr_enthusiasm ~  as.factor(Age) + as.factor(Gender)+ as.factor(college_degree) + assignment, data=d)
+mod_5 <- lm(avg_rating ~  as.factor(Age) + as.factor(Gender)+ as.factor(college_degree) + assignment, data=d)
+
+stargazer(mod,mod_2, mod_3, mod_4,mod_5, type='text')
+
+```
+```{r avg_score}
+quiz_mod <- lm(quiz_avg ~  as.factor(Age) + as.factor(Gender) + assignment, data=d)
+quiz_mod_2 <- lm(quiz_avg ~  as.factor(Age) + as.factor(Gender) + as.factor(Education)+ assignment, data=d)
+stargazer(quiz_mod, quiz_mod_2, type='text')
+```
+
+```{r}
+# Does education level have an effect
+mod_2 <- lm(instr_rating ~  as.factor(Age) + as.factor(Gender)+ as.factor(Education) + assignment, data=d)
+mod_2_2 <- lm(instr_subject ~  as.factor(Age) + as.factor(Gender)+ as.factor(Education) + assignment, data=d)
+mod_2_3 <- lm(instr_material ~  as.factor(Age) + as.factor(Gender)+ as.factor(Education) + assignment, data=d)
+mod_2_4 <- lm(instr_enthusiasm ~  as.factor(Age) + as.factor(Gender)+ as.factor(Education) + assignment, data=d)
+mod_2_5 <- lm(avg_rating ~  as.factor(Age) + as.factor(Gender)+ as.factor(Education) + assignment, data=d)
+
+stargazer(mod_2,mod_2_2, mod_2_3, mod_2_4,mod_2_5, type='text')
+```
